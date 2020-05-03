@@ -1,98 +1,93 @@
 #include "Platform/Platform.hpp"
-#include "SAT.hpp"
+#include <SFML/Graphics.hpp>
+#include "SimplexNoise.hpp"
 
-int main()
-{
-	util::Platform platform;
+#include <cstdlib>
+#include <ctime>
+#include <memory>
 
-#if defined(_DEBUG)
-	std::cout << "Hello World!" << std::endl;
-#endif
+/* ***** Simplex noise visualisation example *****/
+class ExampleNoise {
+    public:
+        explicit ExampleNoise( unsigned int width, unsigned int height ) : height( height ), width( width ) {
+            noiseTexture.create( width, height );
+            pixels = std::unique_ptr< sf::Uint8[] >( new sf::Uint8[width * height * 4] );
+        };
 
-	sf::RenderWindow window;
-	//in Windows at least, this must be called before creating the window
-	float screenScalingFactor = platform.getScreenScalingFactor(window.getSystemHandle());
-	// Use the screenScalingFactor
-	window.create(sf::VideoMode(800.0f * screenScalingFactor, 600.0f * screenScalingFactor), "SFML works!");
-	platform.setIcon(window.getSystemHandle());
+        void drawNoise( sf::RenderWindow &window ) {
+            sf::Sprite noiseSprite;
+            noiseSprite.setTexture( noiseTexture );
+            window.draw( noiseSprite );
+        };
 
-	sf::CircleShape shape(window.getSize().x / 2);
-	shape.setFillColor(sf::Color::White);
+        void generateNoise() {
+            SimplexNoise noiseGenerator;
+            noiseGenerator.randomizeSeed();
 
-	sf::ConvexShape objects[2];
-    for(auto& obj : objects)
-    {
-        obj.setOutlineColor(sf::Color::Black);
-        obj.setOutlineThickness(-2.0f);
-        obj.setFillColor(sf::Color::Transparent);
-    }
-    objects[0].setOrigin(50, 25);
-    objects[0].setPointCount(3);
-    objects[0].setPoint(0, sf::Vector2f(0, 0));
-    objects[0].setPoint(1, sf::Vector2f(0, 50));
-    objects[0].setPoint(2, sf::Vector2f(100, 50));
-    objects[0].setPosition(100, 100);
+            for ( std::size_t y = 0; y < height; ++y ) {
+                for ( std::size_t x = 0; x < width; ++x ) {
+                    double xPos = double( x ) / double( width ) - 0.5;
+                    double yPos = double( y ) / double( height ) - 0.5;
 
-    objects[1].setOrigin(50, 25);
-    objects[1].setPointCount(5);
-    objects[1].setPoint(0, sf::Vector2f(0, 0));
-    objects[1].setPoint(1, sf::Vector2f(0, 50));
-    objects[1].setPoint(2, sf::Vector2f(100, 50));
-    objects[1].setPoint(3, sf::Vector2f(100, 30));
-    objects[1].setPoint(4, sf::Vector2f(50, 0));
-    objects[1].setPosition(200, 200);
-
-    int selected_object = 0;
-    bool moving = true;
-    sf::Vector2f rotation_center;
-	sf::Clock clock;
-	sf::Time dT;
-    while(window.isOpen())
-    {
-		dT = clock.restart();
-        sf::Event event;
-        while(window.pollEvent(event))
-        {
-            if(event.type == sf::Event::KeyPressed)
-                if(event.key.code == sf::Keyboard::Tab)
-                    selected_object = 1 - selected_object;
-            if(event.type == sf::Event::MouseButtonPressed)
-            {
-                if(event.mouseButton.button == sf::Mouse::Left)
-                {
-                    moving = false;
-                    rotation_center = objects[selected_object].getPosition();
+                    double elevation = std::pow(
+                            noiseGenerator.unsignedFBM( frequency * xPos, frequency * yPos, octaves, lacunarity, gain ),
+                            redistribution );
+                    setPixel( x, y, elevation );
                 }
             }
 
-            if(event.type == sf::Event::Closed)
+            noiseTexture.update( pixels.get());
+        };
+
+    private:
+        unsigned int height;
+        unsigned int width;
+        sf::Texture noiseTexture;
+        std::unique_ptr< sf::Uint8[] > pixels;
+
+        /* Values for FBM that produce  nice" output */
+        const unsigned int octaves = 6;
+        const double lacunarity = 2.1042;
+        const double gain = 0.575;
+        const double redistribution = 1.9;
+        const double frequency = 1.5;
+
+        void setPixel( unsigned int x, unsigned int y, double value ) {
+            auto rgba = static_cast<sf::Uint8>(value * 255);
+            sf::Color color( rgba, rgba, rgba, rgba );
+
+            pixels[4 * ( y * width + x )]     = color.r;
+            pixels[4 * ( y * width + x ) + 1] = color.g;
+            pixels[4 * ( y * width + x ) + 2] = color.b;
+            pixels[4 * ( y * width + x ) + 3] = color.a;
+        };
+};
+
+/* ***** Main *****/
+int main() {
+    const unsigned int width = 800;
+    const unsigned int height = 600;
+
+    ExampleNoise noise( width, height );
+    noise.generateNoise();
+
+    sf::RenderWindow window( sf::VideoMode( width, height ), "Simplex Noise 2D visualisation" );
+    while ( window.isOpen()) {
+        sf::Event event;
+        while ( window.pollEvent( event )) {
+            if ( event.type == sf::Event::Closed ) {
                 window.close();
+            }
+
         }
-		if(sf::Keyboard::isKeyPressed(sf::Keyboard::W)) objects[selected_object].move(0,-200*dT.asSeconds());
-		if(sf::Keyboard::isKeyPressed(sf::Keyboard::A))	objects[selected_object].move(-200 * dT.asSeconds(),0);
-		if(sf::Keyboard::isKeyPressed(sf::Keyboard::S))	objects[selected_object].move(0,200*dT.asSeconds());
-		if(sf::Keyboard::isKeyPressed(sf::Keyboard::D))	objects[selected_object].move(200*dT.asSeconds(),0);
-        window.clear(sf::Color::White);
-		float overlap;
-        if(collision(objects[0], objects[1]))
-        {
-            objects[0].setFillColor(sf::Color::Red);
-            objects[1].setFillColor(sf::Color::Red);
-			sf::Vector2f d = { objects[1].getPosition().x - objects[0].getPosition().x,objects[1].getPosition().y - objects[0].getPosition().y };
-			float s = std::sqrt(d.x*d.x + d.y*d.y);
-			sf::Vector2f newpos = objects[0].getPosition();
-			newpos.x-=overlap*d.x/s;
-			newpos.y-=overlap*d.x/s;
-			objects[0].setPosition(newpos);
-        }
-        else
-        {
-            objects[0].setFillColor(sf::Color::Transparent);
-            objects[1].setFillColor(sf::Color::Transparent);
+        if(sf::Mouse::isButtonPressed(sf::Mouse::Left)){
+            noise.generateNoise();
         }
 
-        for(const auto& obj : objects)
-            window.draw(obj);
+        window.clear( sf::Color::Black );
+        noise.drawNoise( window );
         window.display();
     }
+
+    return EXIT_SUCCESS;
 }
